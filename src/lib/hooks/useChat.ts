@@ -38,9 +38,6 @@ export interface UseChatReturn {
   clearMessages: () => void
 }
 
-/**
- * Hook for managing chat state and sending messages.
- */
 export function useChat(options: UseChatOptions): UseChatReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([])
 

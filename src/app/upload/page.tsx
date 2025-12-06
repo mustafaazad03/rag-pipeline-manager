@@ -1,6 +1,6 @@
 "use client"
 
-import React from "react"
+import { useState } from "react"
 import { motion } from "framer-motion"
 import { toast } from "sonner"
 import { StoreSidebar } from "@/components/upload/store-sidebar"
@@ -16,12 +16,11 @@ import {
 } from "@/lib/hooks"
 
 export default function UploadPage() {
-  const [selectedStoreId, setSelectedStoreId] = React.useState<string | null>(null)
-  const [createDialogOpen, setCreateDialogOpen] = React.useState(false)
-  const [deletingStoreId, setDeletingStoreId] = React.useState<string | null>(null)
-  const [deletingDocId, setDeletingDocId] = React.useState<string | null>(null)
+  const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null)
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [deletingStoreId, setDeletingStoreId] = useState<string | null>(null)
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null)
 
-  // Queries
   const {
     data: stores,
     isLoading: storesLoading,
@@ -33,16 +32,12 @@ export default function UploadPage() {
     refetch: refetchDocs,
   } = useDocuments(selectedStoreId)
 
-  // Mutations
   const createStore = useCreateStore()
   const deleteStore = useDeleteStore()
   const uploadDocuments = useUploadDocuments()
   const deleteDocument = useDeleteDocument()
-
-  // Get selected store info
   const selectedStore = stores?.find((s) => s.name === selectedStoreId)
 
-  // Handle store creation
   const handleCreateStore = async (displayName: string) => {
     try {
       const newStore = await createStore.mutateAsync(displayName)
@@ -54,7 +49,6 @@ export default function UploadPage() {
     }
   }
 
-  // Handle store deletion
   const handleDeleteStore = async (storeName: string) => {
     setDeletingStoreId(storeName)
     try {
@@ -70,7 +64,6 @@ export default function UploadPage() {
     }
   }
 
-  // Handle file upload
   const handleFilesUpload = async (files: File[]) => {
     if (!selectedStoreId) {
       toast.error("Please select a store first")
@@ -103,7 +96,6 @@ export default function UploadPage() {
     }
   }
 
-  // Handle document deletion
   const handleDeleteDocument = async (documentName: string) => {
     if (!selectedStoreId) return
     

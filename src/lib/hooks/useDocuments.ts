@@ -68,10 +68,6 @@ async function deleteDocument({ storeId, documentName }: DeleteDocumentParams): 
   }
 }
 
-
-/**
- * Hook to fetch documents in a store.
- */
 export function useDocuments(storeId: string | null) {
   return useQuery({
     queryKey: documentKeys.list(storeId || ''),
@@ -81,9 +77,6 @@ export function useDocuments(storeId: string | null) {
   })
 }
 
-/**
- * Hook to upload a document.
- */
 export function useUploadDocuments() {
   const queryClient = useQueryClient()
 
@@ -97,9 +90,6 @@ export function useUploadDocuments() {
   })
 }
 
-/**
- * Hook to delete a document.
- */
 export function useDeleteDocument() {
   const queryClient = useQueryClient()
 

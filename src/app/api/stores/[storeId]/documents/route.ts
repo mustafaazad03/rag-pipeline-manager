@@ -45,11 +45,6 @@ export async function GET(
   }
 }
 
-/**
- * DELETE /api/stores/[storeId]/documents?name=documentName
- *
- * Deletes a document from a store.
- */
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ storeId: string }> }

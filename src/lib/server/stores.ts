@@ -46,11 +46,6 @@ const cachedStoresWithCounts = unstable_cache(
   }
 )
 
-/**
- * Fetches Gemini File Search stores and augments each with a documentCount.
- * Shared between API routes and server components to avoid duplicate logic.
- * Set `forceRefresh` to true to bypass the cache.
- */
 export async function fetchStoresWithCounts(options?: { forceRefresh?: boolean }) {
   if (options?.forceRefresh) {
     return computeStoresWithCounts()

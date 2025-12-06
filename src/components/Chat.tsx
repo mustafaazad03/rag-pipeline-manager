@@ -44,7 +44,6 @@ export default function Chat() {
     setInput("")
     setIsLoading(true)
 
-    // Simulate AI response (replace with actual API call)
     setTimeout(() => {
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),

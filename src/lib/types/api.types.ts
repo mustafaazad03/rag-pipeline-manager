@@ -1,9 +1,3 @@
-/**
- * API Types
- *
- * Shared types for API responses used by hooks.
- */
-
 export interface Store {
   name: string
   displayName?: string
