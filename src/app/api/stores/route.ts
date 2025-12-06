@@ -1,26 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { revalidateTag } from 'next/cache'
-import { getGeminiService, FileSearchStore } from '@/lib/services/gemini/file-search.service'
+import { getGeminiService } from '@/lib/services/gemini/file-search.service'
 import { fetchStoresWithCounts } from '@/lib/server/stores'
-import { STORES_CACHE_TAG } from '@/lib/server/cache-tags'
+import { getAuthenticatedUser } from '@/lib/server/auth'
+import { prisma } from '@/lib/server/prisma'
+import type { Store } from '@/lib/types/api.types'
 
 export const runtime = 'nodejs'
 export const revalidate = 60
 
 
-interface StoreWithDocCount extends FileSearchStore {
-  documentCount?: number
-}
-
 interface ListStoresResponse {
   success: boolean
-  stores?: StoreWithDocCount[]
+  stores?: Store[]
   error?: string
 }
 
 interface CreateStoreResponse {
   success: boolean
-  store?: FileSearchStore
+  store?: Store
   error?: string
 }
 
@@ -29,10 +26,33 @@ interface DeleteStoreResponse {
   error?: string
 }
 
+function buildStoreResponse(store: {
+  name: string
+  displayName: string | null
+  createdAt: Date
+  updatedAt: Date
+}): Store {
+  return {
+    name: store.name,
+    displayName: store.displayName ?? undefined,
+    createTime: store.createdAt.toISOString(),
+    updateTime: store.updatedAt.toISOString(),
+    documentCount: 0,
+    activeDocumentsCount: 0,
+    failedDocumentsCount: 0,
+    processingDocumentsCount: 0,
+  }
+}
+
 
 export async function GET(): Promise<NextResponse<ListStoresResponse>> {
   try {
-    const storesWithCounts = await fetchStoresWithCounts()
+    const { profile } = await getAuthenticatedUser()
+
+    if (!profile) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+    }
+    const storesWithCounts = await fetchStoresWithCounts(profile.id)
 
     const response = NextResponse.json({
       success: true,
@@ -56,18 +76,30 @@ export async function GET(): Promise<NextResponse<ListStoresResponse>> {
 
 export async function POST(request: NextRequest): Promise<NextResponse<CreateStoreResponse>> {
   try {
+    const { profile } = await getAuthenticatedUser()
+
+    if (!profile) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+    }
     const body = await request.json()
     const { displayName } = body as { displayName?: string }
 
     const geminiService = getGeminiService()
     const store = await geminiService.createStore(displayName)
 
-    const response = NextResponse.json({
-      success: true,
-      store,
+    const created = await prisma.store.create({
+      data: {
+        name: store.name,
+        displayName: store.displayName ?? displayName ?? store.name,
+        ownerId: profile.id,
+      },
     })
 
-  revalidateTag(STORES_CACHE_TAG, 'max')
+    const response = NextResponse.json({
+      success: true,
+      store: buildStoreResponse(created),
+    })
+
     return response
   } catch (error) {
     console.error('Error creating store:', error)
@@ -82,6 +114,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<CreateSto
 
 export async function DELETE(request: NextRequest): Promise<NextResponse<DeleteStoreResponse>> {
   try {
+    const { profile } = await getAuthenticatedUser()
+
+    if (!profile) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+    }
     const { searchParams } = new URL(request.url)
     const name = searchParams.get('name')
 
@@ -92,12 +129,22 @@ export async function DELETE(request: NextRequest): Promise<NextResponse<DeleteS
       )
     }
 
+    const storeRecord = await prisma.store.findUnique({ where: { name } })
+
+    if (!storeRecord || storeRecord.ownerId !== profile.id) {
+      return NextResponse.json(
+        { success: false, error: 'Store not found' },
+        { status: 404 }
+      )
+    }
+
     const geminiService = getGeminiService()
     await geminiService.deleteStore(name, true) // force delete
 
-    const response = NextResponse.json({ success: true })
-    revalidateTag(STORES_CACHE_TAG, 'max')
-    return response
+    await prisma.document.deleteMany({ where: { storeId: storeRecord.id } })
+    await prisma.store.delete({ where: { id: storeRecord.id } })
+
+    return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error deleting store:', error)
     const message = error instanceof Error ? error.message : 'Failed to delete store'

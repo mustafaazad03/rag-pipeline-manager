@@ -1,54 +1,50 @@
-import { unstable_cache } from "next/cache"
 import type { Store } from "@/lib/types/api.types"
-import {
-  GeminiFileSearchService,
-  getGeminiService,
-} from "@/lib/services/gemini/file-search.service"
-import { STORES_CACHE_TAG } from "@/lib/server/cache-tags"
+import { prisma } from "@/lib/server/prisma"
 
-const DOCUMENT_COUNT_TIMEOUT_MS = 3000
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Timeout")), timeoutMs)
-    ),
-  ])
+async function queryStores(ownerId: string) {
+  return prisma.store.findMany({
+    where: { ownerId },
+    include: {
+      documents: {
+        select: { status: true },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  })
 }
 
-async function computeStoresWithCounts(
-  service: GeminiFileSearchService = getGeminiService(),
-  timeoutMs = DOCUMENT_COUNT_TIMEOUT_MS
-): Promise<Store[]> {
-  const stores = await service.listStores()
+type StoreWithDocuments = Awaited<ReturnType<typeof queryStores>>[number]
+type StoreDocument = StoreWithDocuments["documents"][number]
 
-  const storesWithCounts = await Promise.all(
-    stores.map(async (store) => {
-      try {
-        const docs = await withTimeout(service.listDocuments(store.name), timeoutMs)
-        return { ...store, documentCount: docs.length }
-      } catch {
-        return { ...store, documentCount: 0 }
-      }
-    })
+function formatStore(store: StoreWithDocuments): Store {
+  const statusCounts = store.documents.reduce(
+    (
+      acc: { total: number; active: number; failed: number; processing: number },
+      doc: StoreDocument
+    ) => {
+      acc.total += 1
+      if (doc.status === "ACTIVE") acc.active += 1
+      if (doc.status === "FAILED") acc.failed += 1
+      if (doc.status === "PROCESSING") acc.processing += 1
+      return acc
+    },
+    { total: 0, active: 0, failed: 0, processing: 0 }
   )
 
-  return storesWithCounts
+  return {
+    name: store.name,
+    displayName: store.displayName ?? undefined,
+    createTime: store.createdAt.toISOString(),
+    updateTime: store.updatedAt.toISOString(),
+    documentCount: statusCounts.total,
+    activeDocumentsCount: statusCounts.active,
+    failedDocumentsCount: statusCounts.failed,
+    processingDocumentsCount: statusCounts.processing,
+  }
 }
 
-const cachedStoresWithCounts = unstable_cache(
-  () => computeStoresWithCounts(),
-  ["stores-with-counts"],
-  {
-    tags: [STORES_CACHE_TAG],
-    revalidate: 60,
-  }
-)
+export async function fetchStoresWithCounts(ownerId: string): Promise<Store[]> {
+  const stores = await queryStores(ownerId)
 
-export async function fetchStoresWithCounts(options?: { forceRefresh?: boolean }) {
-  if (options?.forceRefresh) {
-    return computeStoresWithCounts()
-  }
-  return cachedStoresWithCounts()
+  return stores.map(formatStore)
 }

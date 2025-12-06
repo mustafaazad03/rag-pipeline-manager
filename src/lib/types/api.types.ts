@@ -66,6 +66,7 @@ export interface ChatResult {
 export interface ChatResponse {
   success: boolean
   result?: ChatResult
+  sessionId?: string
   error?: string
 }
 
@@ -73,5 +74,6 @@ export interface ChatRequest {
   query: string
   storeIds: string[]
   metadataFilter?: string
+  sessionId?: string
 }
 

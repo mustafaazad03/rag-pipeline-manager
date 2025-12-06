@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { revalidateTag } from 'next/cache'
-import { getGeminiService, FileSearchDocument } from '@/lib/services/gemini/file-search.service'
+import { getGeminiService } from '@/lib/services/gemini/file-search.service'
 import { fetchDocumentsForStore, normalizeStoreName } from '@/lib/server/documents'
-import { DOCUMENTS_CACHE_TAG, STORES_CACHE_TAG } from '@/lib/server/cache-tags'
+import { getAuthenticatedUser } from '@/lib/server/auth'
+import { prisma } from '@/lib/server/prisma'
+import type { Document } from '@/lib/types/api.types'
 
 export const runtime = 'nodejs'
 export const revalidate = 60
 
 interface ListDocumentsResponse {
   success: boolean
-  documents?: FileSearchDocument[]
+  documents?: Document[]
   error?: string
 }
 
@@ -18,6 +19,10 @@ export async function GET(
   { params }: { params: Promise<{ storeId: string }> }
 ): Promise<NextResponse<ListDocumentsResponse>> {
   try {
+    const { profile } = await getAuthenticatedUser()
+    if (!profile) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+    }
     const { storeId } = await params
 
     if (!storeId) {
@@ -27,7 +32,7 @@ export async function GET(
       )
     }
 
-    const documents = await fetchDocumentsForStore(storeId)
+  const documents = await fetchDocumentsForStore(storeId, profile.id)
 
     const response = NextResponse.json({
       success: true,
@@ -50,6 +55,10 @@ export async function DELETE(
   { params }: { params: Promise<{ storeId: string }> }
 ): Promise<NextResponse<{ success: boolean; error?: string }>> {
   try {
+    const { profile } = await getAuthenticatedUser()
+    if (!profile) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+    }
     const { storeId } = await params
     const { searchParams } = new URL(request.url)
     const documentName = searchParams.get('name')
@@ -62,22 +71,35 @@ export async function DELETE(
     }
 
     const storeName = normalizeStoreName(storeId)
-    if (!documentName.startsWith(storeName)) {
+    const storeRecord = await prisma.store.findUnique({
+      where: { name: storeName },
+      select: { id: true, ownerId: true },
+    })
+
+    if (!storeRecord || storeRecord.ownerId !== profile.id) {
       return NextResponse.json(
-        { success: false, error: 'Document does not belong to the specified store' },
-        { status: 400 }
+        { success: false, error: 'Store not found' },
+        { status: 404 }
+      )
+    }
+
+    const documentRecord = await prisma.document.findUnique({
+      where: { name: documentName },
+      select: { id: true, storeId: true },
+    })
+
+    if (!documentRecord || documentRecord.storeId !== storeRecord.id) {
+      return NextResponse.json(
+        { success: false, error: 'Document not found' },
+        { status: 404 }
       )
     }
 
     const geminiService = getGeminiService()
     await geminiService.deleteDocument(documentName, true)
+    await prisma.document.delete({ where: { id: documentRecord.id } })
 
-    const response = NextResponse.json({ success: true })
-    await Promise.all([
-      revalidateTag(DOCUMENTS_CACHE_TAG, 'max'),
-      revalidateTag(STORES_CACHE_TAG, 'max'),
-    ])
-    return response
+    return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error deleting document:', error)
     const message = error instanceof Error ? error.message : 'Failed to delete document'

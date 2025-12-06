@@ -1,13 +1,14 @@
 "use client"
 
-import React from "react"
+import React, { useEffect, useState } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import { Upload, MessageSquare, Settings } from "lucide-react"
 import { ThemeToggle } from "@/components/ui/theme-toggle"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { createBrowserSupabaseClient } from "@/lib/utils/supabase/client"
 
 const navItems = [
   { href: "/", label: "Chat", icon: MessageSquare },
@@ -17,6 +18,38 @@ const navItems = [
 
 export default function Navbar() {
   const pathname = usePathname()
+  const router = useRouter()
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+
+  useEffect(() => {
+    const supabase = createBrowserSupabaseClient()
+    let mounted = true
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (!mounted) return
+      setUserEmail(data.user?.email ?? null)
+    })
+
+    const {
+      data: subscription,
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserEmail(session?.user?.email ?? null)
+      router.refresh()
+    })
+
+    return () => {
+      mounted = false
+      subscription?.subscription.unsubscribe()
+    }
+  }, [router])
+
+  const handleSignOut = async () => {
+    const supabase = createBrowserSupabaseClient()
+    await supabase.auth.signOut()
+    setUserEmail(null)
+    router.replace("/login")
+    router.refresh()
+  }
 
   const activeTab = React.useMemo(() => {
     if (!pathname) return "/"
@@ -87,13 +120,18 @@ export default function Navbar() {
         {/* Right side */}
         <div className="flex items-center gap-3">
           <ThemeToggle />
-          
-          {/* Mobile menu button */}
-          <div className="md:hidden">
-            <Button variant="outline" size="icon" className="h-9 w-9">
-              <MessageSquare className="h-4 w-4" />
+          {userEmail ? (
+            <>
+              <span className="hidden text-sm text-muted-foreground md:inline">{userEmail}</span>
+              <Button variant="outline" size="sm" onClick={handleSignOut}>
+                Sign out
+              </Button>
+            </>
+          ) : (
+            <Button asChild variant="default" size="sm">
+              <Link href="/login">Sign in</Link>
             </Button>
-          </div>
+          )}
         </div>
       </div>
     </header>

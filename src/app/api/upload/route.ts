@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { revalidateTag } from 'next/cache'
 import { getGeminiService } from '@/lib/services/gemini/file-search.service'
 import { normalizeStoreName } from '@/lib/server/documents'
-import { DOCUMENTS_CACHE_TAG, STORES_CACHE_TAG } from '@/lib/server/cache-tags'
+import { getAuthenticatedUser } from '@/lib/server/auth'
+import { prisma } from '@/lib/server/prisma'
+import type { DocumentStatus } from '@prisma/client'
 
 export const runtime = 'nodejs'
 
@@ -20,6 +21,10 @@ interface UploadResponse {
 
 export async function POST(request: NextRequest): Promise<NextResponse<UploadResponse>> {
   try {
+    const { profile } = await getAuthenticatedUser()
+    if (!profile) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+    }
     const formData = await request.formData()
     const storeId = formData.get('storeId') as string | null
     const displayName = formData.get('displayName') as string | null
@@ -46,6 +51,17 @@ export async function POST(request: NextRequest): Promise<NextResponse<UploadRes
     }
 
     const storeName = normalizeStoreName(storeId)
+    const storeRecord = await prisma.store.findUnique({
+      where: { name: storeName },
+      select: { id: true, ownerId: true },
+    })
+
+    if (!storeRecord || storeRecord.ownerId !== profile.id) {
+      return NextResponse.json(
+        { success: false, error: 'Store not found' },
+        { status: 404 }
+      )
+    }
 
     const MAX_SIZE = 100 * 1024 * 1024
     const allowedTypes = [
@@ -96,6 +112,30 @@ export async function POST(request: NextRequest): Promise<NextResponse<UploadRes
           { waitForActive: false }
         )
 
+        const status = toDocumentStatus(document.state)
+
+        await prisma.document.upsert({
+          where: { name: document.name },
+          update: {
+            displayName: document.displayName ?? file.name,
+            sizeBytes: Number(document.sizeBytes ?? blob.size),
+            status,
+            storeId: storeRecord.id,
+            uploaderId: profile.id,
+          },
+          create: {
+            name: document.name,
+            displayName: document.displayName ?? file.name,
+            sizeBytes: Number(document.sizeBytes ?? blob.size),
+            status,
+            storeId: storeRecord.id,
+            uploaderId: profile.id,
+            metadata: {
+              mimeType: file.type,
+            },
+          },
+        })
+
         return {
           name: document.name,
           displayName: document.displayName ?? file.name,
@@ -127,11 +167,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<UploadRes
       )
     }
 
-    await Promise.all([
-      revalidateTag(DOCUMENTS_CACHE_TAG, 'max'),
-      revalidateTag(STORES_CACHE_TAG, 'max'),
-    ])
-
     return NextResponse.json({
       success: true,
       documents,
@@ -145,5 +180,22 @@ export async function POST(request: NextRequest): Promise<NextResponse<UploadRes
       { success: false, error: message },
       { status: 500 }
     )
+  }
+}
+
+function toDocumentStatus(state?: string | null): DocumentStatus {
+  const normalized = state?.toUpperCase()
+  switch (normalized) {
+    case 'ACTIVE':
+    case 'STATE_ACTIVE':
+      return 'ACTIVE'
+    case 'FAILED':
+    case 'STATE_FAILED':
+      return 'FAILED'
+    case 'PROCESSING':
+    case 'STATE_PROCESSING':
+      return 'PROCESSING'
+    default:
+      return 'PENDING'
   }
 }

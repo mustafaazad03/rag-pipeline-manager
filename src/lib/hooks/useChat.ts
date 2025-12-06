@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import type { ChatResponse, ChatResult } from '@/lib/types/api.types'
 import type { ChatMessage } from '@/lib/types/chat.types'
 
@@ -7,9 +7,26 @@ interface ChatParams {
   query: string
   storeIds: string[]
   metadataFilter?: string
+  sessionId?: string
 }
 
-async function sendChatMessage(params: ChatParams): Promise<ChatResult> {
+interface ChatHistoryMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  citations?: ChatMessage['citations']
+  responseTimeMs?: number
+  createdAt: string
+}
+
+interface ChatHistoryResponse {
+  success: boolean
+  sessionId?: string
+  messages?: ChatHistoryMessage[]
+  error?: string
+}
+
+async function sendChatMessage(params: ChatParams): Promise<{ result: ChatResult; sessionId?: string }> {
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -22,7 +39,34 @@ async function sendChatMessage(params: ChatParams): Promise<ChatResult> {
     throw new Error(data.error || 'Chat request failed')
   }
 
-  return data.result
+  return { result: data.result, sessionId: data.sessionId }
+}
+
+async function fetchChatHistory(): Promise<{ sessionId: string | null; messages: ChatMessage[] }> {
+  const response = await fetch('/api/chat/history')
+  const data: ChatHistoryResponse = await response.json()
+
+  if (!data.success) {
+    throw new Error(data.error || 'Failed to load chat history')
+  }
+
+  const hydratedMessages = (data.messages ?? []).map<ChatMessage>((message) => ({
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    citations: message.citations,
+    responseTimeMs: message.responseTimeMs,
+    timestamp: new Date(message.createdAt),
+  }))
+
+  return {
+    sessionId: data.sessionId ?? null,
+    messages: hydratedMessages,
+  }
+}
+
+async function clearChatHistory(): Promise<void> {
+  await fetch('/api/chat/history', { method: 'DELETE' })
 }
 
 export interface UseChatOptions {
@@ -40,6 +84,7 @@ export interface UseChatReturn {
 
 export function useChat(options: UseChatOptions): UseChatReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [sessionId, setSessionId] = useState<string | null>(null)
 
   const mutation = useMutation({
     mutationFn: sendChatMessage,
@@ -73,11 +118,16 @@ export function useChat(options: UseChatOptions): UseChatReturn {
       setMessages((prev) => [...prev, userMessage, loadingMessage])
 
       try {
-        const result = await mutation.mutateAsync({
+        const { result, sessionId: returnedSessionId } = await mutation.mutateAsync({
           query: content.trim(),
           storeIds: options.storeIds,
           metadataFilter: options.metadataFilter,
+          sessionId: sessionId ?? undefined,
         })
+
+        if (returnedSessionId) {
+          setSessionId(returnedSessionId)
+        }
 
         // Update assistant message with result
         setMessages((prev) =>
@@ -108,11 +158,31 @@ export function useChat(options: UseChatOptions): UseChatReturn {
         )
       }
     },
-    [mutation, options.storeIds, options.metadataFilter]
+    [mutation, options.storeIds, options.metadataFilter, sessionId]
   )
 
   const clearMessages = useCallback(() => {
     setMessages([])
+    setSessionId(null)
+    void clearChatHistory()
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    fetchChatHistory()
+      .then(({ sessionId: initialSessionId, messages: initialMessages }) => {
+        if (!active) return
+        setMessages(initialMessages)
+        setSessionId(initialSessionId)
+      })
+      .catch((error) => {
+        console.warn('Failed to load chat history', error)
+      })
+
+    return () => {
+      active = false
+    }
   }, [])
 
   const normalizedError = mutation.error
