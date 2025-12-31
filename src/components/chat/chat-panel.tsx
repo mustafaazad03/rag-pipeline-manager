@@ -41,7 +41,7 @@ export function ChatPanel({
   }, [messages])
 
   return (
-    <Card className="flex min-h-[400px] flex-col">
+    <Card className="flex min-h-[400px] flex-col h-[50vh] overflow-y-scroll">
       <CardHeader className="border-b">
         <div className="flex items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-lg">Chat</CardTitle>
@@ -53,7 +53,7 @@ export function ChatPanel({
         </div>
       </CardHeader>
 
-      <CardContent className="flex-1 space-y-4 overflow-y-auto p-4">
+      <CardContent className="flex-1 space-y-4 p-4 h-[50vh] overflow-y-scroll">
         {messages.length === 0 ? (
           <ChatEmptyState selectedStoreCount={selectedStoreCount} />
         ) : (

@@ -109,10 +109,10 @@ export class GeminiFileSearchService {
       file: blob,
       config: config
         ? {
-            displayName: config.displayName,
-            customMetadata: config.customMetadata,
-            chunkingConfig: config.chunkingConfig,
-          }
+          displayName: config.displayName,
+          customMetadata: config.customMetadata,
+          chunkingConfig: config.chunkingConfig,
+        }
         : undefined,
     })
 
@@ -129,10 +129,10 @@ export class GeminiFileSearchService {
     if (!documentName) {
       console.log('No document name in response, searching in store...')
       await this.delay(2000)
-      
+
       const docs = await this.listDocuments(fileSearchStoreName)
       const displayNameToFind = config?.displayName || 'uploaded'
-      
+
       const matchingDoc = docs
         .filter(d => d.displayName === displayNameToFind || d.name?.includes(displayNameToFind.replace(/\.[^/.]+$/, '')))
         .sort((a, b) => {
@@ -173,41 +173,41 @@ export class GeminiFileSearchService {
 
     // Now poll the document status until it's no longer PROCESSING
     onProgress?.(60)
-    
+
     let document: FileSearchDocument | null = null
     let pollCount = 0
     const maxPolls = 60 // Max 60 seconds for processing
-    
+
     while (pollCount < maxPolls) {
       try {
         document = await this.getDocument(documentName)
-        
+
         // Check if processing is complete
         if (document.state === 'ACTIVE' || document.state === 'STATE_ACTIVE') {
           onProgress?.(100)
           return document
         }
-        
+
         if (document.state === 'FAILED' || document.state === 'STATE_FAILED') {
           // Build a detailed error message
           let errorDetails = 'Document processing failed.'
-          
+
           if (document.error?.message) {
             errorDetails += ` Reason: ${document.error.message}`
           } else {
             errorDetails += ' The file may be corrupted, too large, or in an unsupported format.'
           }
-          
+
           errorDetails += '\n\nSupported formats: PDF, TXT, HTML, CSS, CSV, TSV, Markdown, XML, RTF.'
           errorDetails += '\nMax file size: 50MB.'
-          
+
           throw new Error(errorDetails)
         }
-        
+
         pollCount++
         const processingProgress = Math.min(60 + (pollCount / maxPolls) * 35, 95)
         onProgress?.(processingProgress)
-        
+
         await this.delay(1000)
       } catch (getError) {
         console.warn('Error getting document status:', getError)
@@ -217,7 +217,7 @@ export class GeminiFileSearchService {
     }
 
     onProgress?.(100)
-    
+
     if (document) {
       return document
     }
@@ -243,7 +243,7 @@ export class GeminiFileSearchService {
     // Poll until the operation completes (if not already done)
     let pollCount = 0
     const maxPolls = 30
-    
+
     while (!operation.done && pollCount < maxPolls) {
       await this.delay(1000)
       try {
@@ -312,35 +312,36 @@ export class GeminiFileSearchService {
 
     // Extract citations from grounding metadata
     const groundingMetadata = response.candidates?.[0]?.groundingMetadata
+    console.log("groundingMetadata", groundingMetadata)
     const citations: SearchResult['citations'] = []
-    
+
     // Map to group content by source (for unique sources)
     const sourceContentMap = new Map<string, string[]>()
 
     if (groundingMetadata && typeof groundingMetadata === 'object') {
       const gm = groundingMetadata as Record<string, unknown>
-      
+
       // Try to get grounding chunks
-      const chunks = gm.groundingChunks as Array<{ 
-        retrievedContext?: { 
+      const chunks = gm.groundingChunks as Array<{
+        retrievedContext?: {
           uri?: string
           title?: string
-          text?: string 
-        } 
+          text?: string
+        }
       }> | undefined
-      
+
       if (Array.isArray(chunks)) {
         for (const chunk of chunks) {
           if (chunk.retrievedContext) {
             // Extract a meaningful source name
             let source = chunk.retrievedContext.title || chunk.retrievedContext.uri || 'Document'
-            
+
             // If source is a path, extract just the filename
             if (source.includes('/')) {
               const parts = source.split('/')
               source = parts[parts.length - 1] || source
             }
-            
+
             // Clean up the source name
             source = source
               .replace(/^documents\//, '')
@@ -349,50 +350,50 @@ export class GeminiFileSearchService {
               .replace(/([a-z])([A-Z])/g, '$1 $2') // Add spaces between camelCase
               .replace(/[-_]/g, ' ') // Replace dashes/underscores with spaces
               .trim()
-            
+
             // Capitalize first letter
             source = source.charAt(0).toUpperCase() + source.slice(1)
-            
+
             // Get a clean excerpt from the content
             let content = chunk.retrievedContext.text || ''
-            
+
             // Clean up the content - remove page markers and excessive whitespace
             content = content
               .replace(/---\s*PAGE\s*\d+\s*---/gi, '')
               .replace(/\n{3,}/g, '\n\n')
               .replace(/\s+/g, ' ')
               .trim()
-            
+
             // Skip empty or very short content
             if (content.length < 20) continue
-            
+
             // Group content by source
             if (!sourceContentMap.has(source)) {
               sourceContentMap.set(source, [])
             }
-            
+
             // Add content if it's not a duplicate snippet
             const existingContents = sourceContentMap.get(source)!
             const isDuplicate = existingContents.some(
               existing => existing.includes(content.substring(0, 50)) || content.includes(existing.substring(0, 50))
             )
-            
+
             if (!isDuplicate) {
               existingContents.push(content)
             }
           }
         }
       }
-      
+
       // Convert map to citations array with merged content
       for (const [source, contents] of sourceContentMap) {
         // Join multiple content snippets, limit total length
         let mergedContent = contents.slice(0, 3).join(' [...] ')
-        
+
         if (mergedContent.length > 400) {
           mergedContent = mergedContent.substring(0, 397) + '...'
         }
-        
+
         citations.push({
           source,
           content: mergedContent,
