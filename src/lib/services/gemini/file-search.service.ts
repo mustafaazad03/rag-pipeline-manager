@@ -289,7 +289,7 @@ export class GeminiFileSearchService {
     query: string,
     fileSearchStoreNames: string[],
     metadataFilter?: string,
-    model = 'gemini-2.5-flash'
+    model = process.env.GEMINI_MODEL || 'gemini-flash-latest'
   ): Promise<SearchResult> {
     const startTime = Date.now()
 
